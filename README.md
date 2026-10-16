@@ -26,7 +26,6 @@ Both tests use sector bounds of the network computed by
 The tests are for *positive* systems, where the states never become negative:
 
 * every entry of `B` and of `C` is `>= 0`,
-* the starting states are `>= 0`,
 * `pi(0) = 0`, so that `x = 0` is an equilibrium. A network without biases
   and with tanh, ReLU or leaky ReLU activations has this property.
 
