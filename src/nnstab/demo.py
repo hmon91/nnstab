@@ -13,7 +13,8 @@ def example_controller() -> ns.Network:
 
     One input, two hidden layers of 8 tanh neurons, one output, no biases,
     so pi(0) = 0. It stays within 0.006 of the controller for 0 <= y <= 3.
-    Its gain falls from about 2.5 near y = 0 to about 0.5 for large y.
+    Near y = 0, pi(y) is about -2.5 y. For large y its output levels off
+    (it was trained only for |y| <= 3), so its gain |pi(y) / y| goes to 0.
     """
     data = resources.files("nnstab") / "data"
     weights = []

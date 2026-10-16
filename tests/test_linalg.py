@@ -34,7 +34,7 @@ def test_is_hurwitz():
         M = random_metzler_hurwitz(rng, int(rng.integers(1, 6)))
         assert nst.is_hurwitz(M) and not nst.is_hurwitz(M + (0.01 - nst.spectral_abscissa(M)) * np.eye(len(M)))
     assert nst.is_hurwitz([[-1.0, -5.0], [5.0, -1.0]])          # not Metzler: eigenvalues -1 +- 5i
-    assert not nst.is_hurwitz([[1.0, -5.0], [5.0, -1.0]])
+    assert not nst.is_hurwitz([[1.0, -5.0], [5.0, 1.0]])        # eigenvalues 1 +- 5i
 
 
 def test_copositive_vector():

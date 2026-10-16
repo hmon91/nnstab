@@ -38,7 +38,7 @@ function run_tests()
         nnstab.is_metzler([-1 0; 2 -3]) && ~nnstab.is_metzler([-1 -0.1; 2 -3]) && ...
         nnstab.is_metzler([5 1e-20; -1e-14 3]));
     nfail = nfail + tally('is_hurwitz on matrices that are not Metzler', ...
-        nnstab.is_hurwitz([-1 -5; 5 -1]) && ~nnstab.is_hurwitz([1 -5; 5 -1]));
+        nnstab.is_hurwitz([-1 -5; 5 -1]) && ~nnstab.is_hurwitz([1 -5; 5 1]));      % -1 +- 5i and 1 +- 5i
 
     Mr = [-1 0; 1 -2];                  % reducible: its Perron vector has a zero entry
     [v, d] = nnstab.copositive_vector(Mr);
