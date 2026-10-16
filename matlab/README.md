@@ -1,42 +1,40 @@
 # nnstab for MATLAB
 
-Stability checks for feedback loops with a neural network controller, in
-MATLAB and GNU Octave. The Python package with the same method is described
-in the [main README](../README.md).
+This folder contains the MATLAB implementation of nnstab, which verifies the
+exponential stability of positive feedback systems with a neural network
+controller. It is also compatible with GNU Octave. The problem statement,
+the assumptions and the method are the same as in the Python package and are
+described in the [main README](../README.md).
 
-You give a plant and the trained network that closes the loop:
-
-    x' = A x + B u,    y = C x,    u = pi(y)
-
-nnstab checks whether the closed loop is exponentially stable. First it
-tries the **global test** (stable for every starting state `x0 >= 0`). If
-that fails, it looks for a **local region** of starting states around 0
-where the loop is stable, and makes it as large as it can. Both tests use
-sector bounds of the network computed by
-[nnsector](https://github.com/hmon91/nnsector).
-
-The method needs `B >= 0`, `C >= 0` (every entry), starting states
-`x0 >= 0`, and `pi(0) = 0` (for example, a network without biases with
-tanh, ReLU or leaky ReLU activations).
+In brief, nnstab considers the closed loop `x' = A x + B u`, `y = C x`,
+`u = pi(y)` with `B >= 0`, `C >= 0` and `pi(0) = 0`. It first tests global
+exponential stability, for all initial states `x0 >= 0`, with the global
+sector bound of the network. If this test fails, it computes the largest
+certified region of attraction it can find with local sector bounds. The
+sector bounds are computed with [nnsector](https://github.com/hmon91/nnsector).
 
 ## Setup
 
-nnstab needs the MATLAB version of nnsector. Put both on the path:
+nnstab requires the MATLAB version of nnsector. Both libraries must be on
+the path:
 
 ```matlab
 addpath('path/to/nnsector/matlab')     % the folder that contains +nnsector
 addpath('path/to/nnstab/matlab')       % the folder that contains +nnstab
 ```
 
-Needs MATLAB R2016b or newer. It also runs in GNU Octave (tested with 8.4).
+The library requires MATLAB R2016b or later. It also runs in GNU Octave
+(tested with version 8.4).
 
 ## Quick start
 
 ```matlab
-[A, B, C, net] = nnstab.example_system('local');   % or your own plant and network
+[A, B, C, net] = nnstab.example_system('local');   % or a user-defined system
 res = nnstab.verify(A, B, C, net);
 nnstab.report(res)
 ```
+
+The first lines of the output are:
 
 ```
 Locally exponentially stable (the global test failed).
@@ -44,35 +42,29 @@ Locally exponentially stable (the global test failed).
   it holds every x0 >= 0 with sum(x0) <= 1.706
   in it: sum(x(t)) <= 2.09 exp(-0.000324 t) sum(x0)
   output box 0 <= y <= 1.848
-  note: this is the largest region found, and near its edge the guaranteed decay rate is
-  small; pass MinDecay for a faster guaranteed rate on a smaller region.
-...
 ```
 
-* **region**: every solution that starts in this set stays in it and goes
-  to 0.
-* **sum(x0) <= 1.706**: every starting state with `x1 + x2 + x3 <= 1.706`
-  is inside the region.
-* **exp(-0.000324 t)**: how fast the solutions go to 0, at least. For a
-  faster rate on a smaller region:
+The meaning of these lines is explained in the
+[main README](../README.md#quick-start). A larger guaranteed decay rate is
+obtained on a smaller region with the option `'MinDecay'`:
 
 ```matlab
 res = nnstab.verify(A, B, C, net, 'MinDecay', 0.5);
-% it holds every x0 >= 0 with sum(x0) <= 1.32
-% in it: sum(x(t)) <= 2.1 exp(-0.501 t) sum(x0)
+% The region contains every x0 >= 0 with sum(x0) <= 1.32,
+% and sum(x(t)) <= 2.1 exp(-0.501 t) sum(x0) holds on it.
 ```
 
-In code:
+The result can also be used in code:
 
 ```matlab
 res.status                    % 'global', 'local' or 'none'
-res.stable                    % true if the global or the local test passed
-nnstab.in_region(res, x0)     % true if the result covers the starting state x0
+res.stable                    % true if the global or the local test succeeded
+nnstab.in_region(res, x0)     % true if the result covers the initial state x0
 res.global_check              % details of the global test
-res.local_check               % details of the local test ([] if the global test passed)
+res.local_check               % details of the local test ([] after a global result)
 ```
 
-### Your own system
+**User-defined systems.**
 
 ```matlab
 A = [-3.0  3.5  2.0
@@ -80,75 +72,56 @@ A = [-3.0  3.5  2.0
       3.5  3.5 -5.0];
 B = [1.0; 0.5; 1.0];
 C = [1.0 1.0 0.5];
-net = nnsector.network({W1, W2, W3});    % W{i} is l_i x l_{i-1}; no biases, so pi(0) = 0
+net = nnsector.network({W1, W2, W3});   % W{i} is l_i x l_{i-1}; no biases, hence pi(0) = 0
 res = nnstab.verify(A, B, C, net);
 ```
 
-## How it works
-
-On a set of outputs, the network stays between two straight lines through
-the origin: `gamma1*y <= pi(y) <= gamma2*y` (entry by entry for several
-inputs or outputs).
-
-1. **Global test.** nnsector gives `Gamma2` for every `y >= 0`, with
-   `Gamma1 = -Gamma2`. The loop is globally exponentially stable for all
-   `x0 >= 0` if `A + B*Gamma1*C` is Metzler (all entries off the diagonal
-   are `>= 0`, so the states stay `>= 0`) and `A + B*Gamma2*C` is Hurwitz
-   (all eigenvalues have a negative real part, so the states go to 0).
-2. **Local test.** On a box of outputs `0 <= y <= ybar`, nnsector gives
-   slopes `gamma1`, `gamma2` that are much closer together. If
-   `A + B*gamma1*C` is Metzler and `A + B*gamma2*C` is Hurwitz, nnstab finds
-   `v > 0` with `v'*(A + B*gamma2*C) < 0`. Then the region
-   `{x >= 0 : v'*x <= rho}` is a region of attraction, with `rho` as large
-   as possible while `C*x <= ybar` on it. Along solutions in it,
-   `v'*x(t) <= exp(-decay*t) * v'*x0`.
-3. **Search.** nnstab tries boxes `0 <= y <= s*d`: it doubles `s` (or
-   halves it) until the test changes its answer, finds the edge by
-   bisection, and keeps the box whose region holds the largest `sum(x0)`.
-
-The tests are sufficient conditions: when one passes, the loop is stable;
-when both fail, the loop may still be stable. The main README explains the
-method in more detail.
-
 ## Functions
 
-| Function | What it does |
+| Function | Description |
 |---|---|
-| `nnstab.verify(A, B, C, net, ...)` | The global test, then, if it fails, the search for a local region. Options: `'ybar'` (check only this box), `'Direction'` (shape of the searched boxes, default all ones), `'v'`, `'MinDecay'` and `'RelTol'` (default `1e-3`). |
-| `nnstab.check_global(A, B, C, net)` | Only the global test. |
-| `nnstab.check_local(A, B, C, net, ybar, ...)` | Only the local test, on one box. Options: `'v'` (`'perron'`, the default, for the fastest guaranteed decay, or `'lp'` for the largest region with a given decay rate) and `'MinDecay'` (default 0). |
-| `nnstab.report(r)` | Prints a short report of any result (or returns it as text). |
-| `nnstab.in_region(r, X)` | True if a result covers every starting state (column) of `X`. |
-| `nnstab.simulate(A, B, C, net, x0, t_end, dt)` | Simulates the loop (Runge-Kutta 4, default `dt = 0.01`) from one starting state or many (one per column). |
-| `nnstab.sample_region(chk, k, seed)` | `k` random starting states, spread evenly over a certified region. |
-| `nnstab.example_system(kind)` | The example loops `'local'` and `'global'`. Returns `[A, B, C, net]`. |
-| `nnstab.example_controller()` | The example network: 1 input, two hidden layers of 8 tanh neurons, 1 output, no biases. |
-| `nnstab.check_system(A, B, C, net)` | Checks the sizes, `B >= 0`, `C >= 0` and `pi(0) = 0`. |
-| `nnstab.is_metzler`, `nnstab.is_hurwitz`, `nnstab.spectral_abscissa`, `nnstab.hurwitz_certificate`, `nnstab.perron_vector`, `nnstab.copositive_vector`, `nnstab.largest_region_vector` | The matrix tools behind the tests. |
+| `nnstab.verify(A, B, C, net, ...)` | Global test, followed by the search for a local region if the global test fails. Options: `'ybar'` (test only this box), `'Direction'` (direction of the searched boxes, default all ones), `'v'`, `'MinDecay'` and `'RelTol'` (default `1e-3`). |
+| `nnstab.check_global(A, B, C, net)` | Global test only. |
+| `nnstab.check_local(A, B, C, net, ybar, ...)` | Local test on one box. Options: `'v'` (`'perron'` (default) for the largest guaranteed decay rate, or `'lp'` for the largest region with a prescribed decay rate) and `'MinDecay'` (default 0). |
+| `nnstab.report(r)` | Prints a short report of any result, or returns it as text. |
+| `nnstab.in_region(r, X)` | True if a result covers every initial state (column) of `X`. |
+| `nnstab.simulate(A, B, C, net, x0, t_end, dt)` | Simulates the closed loop (fourth-order Runge-Kutta method, default `dt = 0.01`) from one or several initial states (one per column). |
+| `nnstab.sample_region(chk, k, seed)` | Draws `k` initial states uniformly from a certified region. |
+| `nnstab.example_system(kind)` | The example systems `'local'` and `'global'`. Returns `[A, B, C, net]`. |
+| `nnstab.example_controller()` | The example network: one input, two hidden layers of eight tanh neurons, one output, and no biases. |
+| `nnstab.check_system(A, B, C, net)` | Checks the dimensions and the assumptions `B >= 0`, `C >= 0` and `pi(0) = 0`. |
+| `nnstab.is_metzler`, `nnstab.is_hurwitz`, `nnstab.spectral_abscissa`, `nnstab.hurwitz_certificate`, `nnstab.perron_vector`, `nnstab.copositive_vector`, `nnstab.largest_region_vector` | Matrix routines used by the tests. |
 
-What the results hold:
+For one input, `B` may be given as a row or a column; for one output, the
+same holds for `C`.
 
-* `check_global`: `Gamma1`, `Gamma2`, `M1 = A + B*Gamma1*C`,
-  `M2 = A + B*Gamma2*C`, `metzler`, `hurwitz`, `certified`, `decay`, `v`,
-  `overshoot` and `reason` (why it failed). If certified, every solution
-  with `x0 >= 0` has `sum(x(t)) <= overshoot * exp(-decay*t) * sum(x0)`.
-* `check_local`: the same with `gamma1` and `gamma2`, plus `ybar`, `rho`,
-  `radius` (every `x0 >= 0` with `sum(x0) <= radius` is in the region) and
-  `method`.
-* `verify`: `status`, `stable`, `global_check`, `local_check`,
-  `boxes_tried` and `note`.
+## Results
 
-For one input, `B` may be a row or a column; for one output, so may `C`.
+* `nnstab.check_global` returns a structure with the fields `Gamma1`,
+  `Gamma2`, `M1` (the matrix `A + B*Gamma1*C`), `M2` (the matrix
+  `A + B*Gamma2*C`), `metzler`, `hurwitz`, `certified`, `decay`, `v`,
+  `overshoot` and `reason` (the cause of a failure). If the test succeeds,
+  every solution with `x0 >= 0` satisfies
+  `sum(x(t)) <= overshoot * exp(-decay*t) * sum(x0)`.
+* `nnstab.check_local` returns the same fields with `gamma1` and `gamma2`,
+  together with `ybar`, `rho`, `radius` (every `x0 >= 0` with
+  `sum(x0) <= radius` lies in the region) and `method`. The region is
+  `{x >= 0 : v'*x <= rho}`.
+* `nnstab.verify` returns a structure with the fields `status`, `stable`,
+  `global_check`, `local_check`, `boxes_tried` and `note`.
 
 ## Examples and tests
 
-* `examples/example1.m`: the local example. Checks the result by
-  simulation from random starting states in the region, and plots them.
-* `examples/example2.m`: the global example, with a simulation from large
-  starting states.
-* `tests/run_tests.m`: from the `tests` folder, run `run_tests`. Some tests
-  compare with the numbers of the Python package.
+| File | Content |
+|---|---|
+| `examples/example1.m` | The local example, with a validation of the region by simulation and a plot. |
+| `examples/example2.m` | The global example, with a simulation from large initial states. |
+| `tests/run_tests.m` | The test suite. Run `run_tests` from the `tests` folder. Several tests compare the results with those of the Python package. |
 
-The examples and the tests find nnsector through the environment variable
-`NNSECTOR_MATLAB` (the folder that contains `+nnsector`), or in a folder
-`nnsector` next to the `nnstab` folder.
+The examples and the tests locate nnsector through the environment variable
+`NNSECTOR_MATLAB` (the folder that contains `+nnsector`) or in a folder
+named `nnsector` next to the `nnstab` folder.
+
+## Citation
+
+See the [main README](../README.md#citation).

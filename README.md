@@ -2,46 +2,53 @@
 
 [![tests](https://github.com/hmon91/nnstab/actions/workflows/tests.yml/badge.svg)](https://github.com/hmon91/nnstab/actions/workflows/tests.yml)
 
-**Stability checks for feedback loops with a neural network controller**, in
-Python and MATLAB.
+**nnstab** verifies the exponential stability of positive feedback systems
+with a neural network controller. It is implemented in Python and in MATLAB
+(compatible with GNU Octave), and it uses sector bounds of the network
+computed with [nnsector](https://github.com/hmon91/nnsector).
 
-You give a plant and the trained network that closes the loop:
+## Problem statement
 
-    x' = A x + B u,    y = C x,    u = pi(y)
+nnstab considers the closed-loop system
 
-nnstab checks whether the closed loop is **exponentially stable**: every
-solution goes to 0 at least as fast as a decaying exponential. It works in
-two steps:
+```math
+\dot{x}(t) = A\,x(t) + B\,u(t), \qquad y(t) = C\,x(t), \qquad u(t) = \pi\big(y(t)\big),
+```
 
-1. **Global test.** Is the loop stable for every starting state `x0 >= 0`?
-2. **Local test.** If the global test fails, nnstab looks for a region of
-   starting states around 0 where the loop is stable, and makes it as large
-   as it can.
+with state $`x \in \mathbb{R}^n`$, output $`y \in \mathbb{R}^p`$, input
+$`u \in \mathbb{R}^m`$, and a trained feedforward neural network
+$`\pi : \mathbb{R}^p \to \mathbb{R}^m`$. The system is assumed to be a
+positive Lur'e system, that is:
 
-Both tests use sector bounds of the network computed by
-[nnsector](https://github.com/hmon91/nnsector).
+* **(A1)** $`B \ge 0`$ and $`C \ge 0`$ (entrywise);
+* **(A2)** $`\pi(0) = 0`$, so that the origin is an equilibrium. This holds,
+  for example, for networks without biases and with tanh, ReLU or leaky ReLU
+  activation functions.
 
-## What the method needs
+The matrix $`A`$ need not be Hurwitz. nnstab checks (A1) and (A2) and reports
+an error if either is violated. As usual for positive systems, the state
+space is the nonnegative orthant, so the results below concern initial
+states $`x_0 \ge 0`$.
 
-The tests are for *positive* systems, where the states never become negative:
+The verification has two stages:
 
-* every entry of `B` and of `C` is `>= 0`,
-* `pi(0) = 0`, so that `x = 0` is an equilibrium. A network without biases
-  and with tanh, ReLU or leaky ReLU activations has this property.
+1. **Global stage.** nnstab tests whether the origin is globally
+   exponentially stable, that is, for every initial state $`x_0 \ge 0`$.
+2. **Local stage.** If global stability cannot be established, nnstab
+   computes an estimate of the region of attraction: a set of initial states
+   from which every solution converges exponentially to the origin. It
+   searches for the largest such set.
 
-`A` does not have to be stable on its own: the controller may be what makes
-the loop stable. nnstab checks `B`, `C` and `pi(0)` and tells you if one of
-them does not fit.
-
-## Install
+## Installation
 
 ```bash
 pip install git+https://github.com/hmon91/nnstab.git
 ```
 
-This also installs nnsector. It needs Python 3.10 or newer and NumPy. For
-PyTorch models, also install PyTorch (`pip install torch`). To work on the
-code:
+This command also installs nnsector. The package requires Python 3.10 or
+later and NumPy. PyTorch is optional and is needed only for PyTorch models
+(`pip install torch`). To install the package for development and run the
+tests:
 
 ```bash
 git clone https://github.com/hmon91/nnstab.git
@@ -55,10 +62,12 @@ pytest
 ```python
 import nnstab as nst
 
-A, B, C, net = nst.example_system("local")     # or your own plant and network
+A, B, C, net = nst.example_system("local")     # or a user-defined system
 res = nst.verify(A, B, C, net)
 print(res)
 ```
+
+The first lines of the output are:
 
 ```
 Locally exponentially stable (the global test failed).
@@ -66,50 +75,39 @@ Locally exponentially stable (the global test failed).
   it holds every x0 >= 0 with sum(x0) <= 1.706
   in it: sum(x(t)) <= 2.09 exp(-0.000324 t) sum(x0)
   output box 0 <= y <= 1.848
-  note: this is the largest region found, and near its edge the guaranteed decay rate is
-  small; pass min_decay for a faster guaranteed rate on a smaller region.
-
-Global check: not certified
-  global sector slopes  Gamma1 = -4.791,  Gamma2 = 4.791
-  A + B Gamma1 C Metzler: no,  A + B Gamma2 C Hurwitz: no
-  A + B Gamma1 C is not Metzler: the global lower slope -Gamma2 is too negative to keep
-  the states nonnegative.
-
-Local check on 0 <= y <= 1.848: certified
-  local sector slopes  gamma1 = -3.097,  gamma2 = -0.4766
-  A + B gamma1 C Metzler: yes,  A + B gamma2 C Hurwitz: yes
-  region: {x >= 0 : v^T x <= 3.563},  v = [1.929, 2.089, 1]
-  it holds every x0 >= 0 with sum(x0) <= 1.706
-  in it: sum(x(t)) <= 2.09 exp(-0.000324 t) sum(x0)
 ```
 
-How to read it:
+The full report continues with the details of the global and the local
+test. The lines shown above have the following meaning.
 
-* **region**: every solution that starts in this set stays in it and goes
-  to 0.
-* **sum(x0) <= 1.706**: a simple way to see how big the region is. Every
-  starting state with `x1 + x2 + x3 <= 1.706` is inside it.
-* **exp(-0.000324 t)**: how fast the solutions go to 0, at least. Near the
-  edge of the largest region this guaranteed rate is small. For a faster
-  rate, ask for it, and you get a smaller region:
+| Line | Meaning |
+|---|---|
+| `region` | The certified region of attraction $`\Omega = \{x \ge 0 : v^\top x \le \rho\}`$. |
+| `sum(x0) <= 1.706` | Every initial state $`x_0 \ge 0`$ with $`\lVert x_0 \rVert_1 \le 1.706`$ lies in $`\Omega`$. This number is a simple measure of the size of $`\Omega`$. |
+| `sum(x(t)) <= ...` | The guaranteed exponential bound for solutions that start in $`\Omega`$, with overshoot constant 2.09 and decay rate 0.000324. |
+| `output box` | The box of outputs on which the local sector bound was computed. |
+
+The largest region has a small guaranteed decay rate, because its box lies
+at the limit of what the test allows. A larger guaranteed decay rate is
+obtained on a smaller region with the option `min_decay`:
 
 ```python
 res = nst.verify(A, B, C, net, min_decay=0.5)
-# it holds every x0 >= 0 with sum(x0) <= 1.32
-# in it: sum(x(t)) <= 2.1 exp(-0.501 t) sum(x0)
+# The region contains every x0 >= 0 with sum(x0) <= 1.32,
+# and sum(x(t)) <= 2.1 exp(-0.501 t) sum(x0) holds on it.
 ```
 
-In code:
+The result can also be used in code:
 
 ```python
-res.status          # 'global', 'local' or 'none'
-res.stable          # True if the global or the local test passed
-res.contains(x0)    # True if the result covers the starting state x0
-res.global_check    # details of the global test
-res.local_check     # details of the local test (None if the global test passed)
+res.status          # "global", "local" or "none"
+res.stable          # True if the global or the local test succeeded
+res.contains(x0)    # True if the result covers the initial state x0
+res.global_check    # details of the global test (GlobalCheck)
+res.local_check     # details of the local test (LocalCheck; None after a global result)
 ```
 
-### Your own system
+**User-defined systems.**
 
 ```python
 import numpy as np
@@ -121,182 +119,194 @@ A = np.array([[-3.0,  3.5,  2.0],
               [ 3.5,  3.5, -5.0]])
 B = np.array([[1.0], [0.5], [1.0]])
 C = np.array([[1.0, 1.0, 0.5]])
-
-# weights W_i have shape (l_i, l_{i-1}), like torch.nn.Linear.weight
-net = ns.Network([W1, W2, W3], activation="tanh")    # no biases, so pi(0) = 0
+net = ns.Network([W1, W2, W3], activation="tanh")   # no biases, hence pi(0) = 0
 
 res = nst.verify(A, B, C, net)
 ```
 
-### From PyTorch
+A trained PyTorch model can be passed in place of `net`, for example a
+`torch.nn.Sequential` of `nn.Linear(..., bias=False)` layers and `nn.Tanh()`
+activations. It is converted with `nnsector.Network.from_torch`.
 
-```python
-model = torch.nn.Sequential(
-    torch.nn.Linear(1, 16, bias=False), torch.nn.Tanh(),
-    torch.nn.Linear(16, 16, bias=False), torch.nn.Tanh(),
-    torch.nn.Linear(16, 1, bias=False),
-)
-# ... train the model ...
-res = nst.verify(A, B, C, model)
+## Method
+
+**Sector condition.** Suppose that the network satisfies, entrywise,
+
+```math
+\Gamma_1\,y \;\le\; \pi(y) \;\le\; \Gamma_2\,y \qquad \text{for all } y \in \mathcal{Y},
 ```
 
-`bias=False` keeps `pi(0) = 0`. The model is read with nnsector's
-`Network.from_torch`.
+where $`\mathcal{Y}`$ is a set of nonnegative outputs, and consider the two
+conditions
 
-## How it works
+* **(C1)** $`A + B\Gamma_1 C`$ is **Metzler**, that is, all its off-diagonal
+  entries are nonnegative (this keeps the state nonnegative);
+* **(C2)** $`A + B\Gamma_2 C`$ is **Hurwitz**, that is, all its eigenvalues
+  have negative real parts.
 
-On a set of outputs, the network stays between two straight lines through
-the origin:
+If $`\mathcal{Y}`$ is the whole nonnegative orthant, (C1) and (C2) imply that
+the origin is globally exponentially stable for all $`x_0 \ge 0`$; this is
+the positive Aizerman result [[3]](#citation). If $`\mathcal{Y}`$ is a box,
+the same conditions give exponential stability for solutions whose outputs
+remain in the box. nnstab uses the first case in the global test and the
+second case in the local test.
 
-    gamma1 y <= pi(y) <= gamma2 y
+**Global test.** nnsector provides the global bound
+$`\Gamma_2 = c^{\,q}\,\lvert W_{q+1} \rvert \cdots \lvert W_1 \rvert`$ and
+$`\Gamma_1 = -\Gamma_2`$, which hold for all $`y \ge 0`$. If (C1) and (C2)
+hold for these matrices, the origin is globally exponentially stable for all
+$`x_0 \ge 0`$ [[2]](#citation). The global sector is wide, so this test is
+conservative. It typically succeeds when the network has a small effect on
+the loop.
 
-For several inputs or outputs, `gamma1` and `gamma2` are matrices and the
-inequalities hold entry by entry. The positive Aizerman result [3] says: if
-the two linear loops made with these slopes behave well, so does the loop
-with the network.
+**Local test.** On a box of outputs $`0 \le y \le \bar{y}`$, nnsector
+provides slopes $`\gamma_1, \gamma_2`$ that are much closer together. If (C1)
+and (C2) hold with these slopes, that is, if $`A + B\gamma_1 C`$ is Metzler
+and $`M = A + B\gamma_2 C`$ is Hurwitz, there is a vector $`v > 0`$ with
+$`v^\top M < 0`$, and nnstab constructs the set
 
-**1. Global test.** nnsector gives slopes that hold for every `y >= 0`:
-`Gamma1 = -Gamma2` and `Gamma2`. The loop is globally exponentially stable
-for all `x0 >= 0` if
+```math
+\Omega = \{\, x \ge 0 \;:\; v^\top x \le \rho \,\},
+```
 
-* `A + B Gamma1 C` is **Metzler**: all its entries off the diagonal are
-  `>= 0`. This keeps the states from becoming negative.
-* `A + B Gamma2 C` is **Hurwitz**: all its eigenvalues have a negative real
-  part. This makes the states go to 0.
+where $`\rho`$ is the largest value for which $`C x \le \bar{y}`$ holds for
+all $`x \in \Omega`$. The function $`V(x) = v^\top x`$ is a linear copositive
+Lyapunov function. The set $`\Omega`$ is forward invariant, and every
+solution that starts in $`\Omega`$ satisfies
 
-The global slopes are far apart, so this test is strict. It passes when the
-network has a small effect on the loop.
+```math
+v^\top x(t) \;\le\; e^{-\lambda t}\, v^\top x_0 ,
+\qquad
+\lVert x(t) \rVert_1 \;\le\; \frac{v_{\max}}{v_{\min}}\, e^{-\lambda t}\, \lVert x_0 \rVert_1 ,
+```
 
-**2. Local test.** On a box of outputs `0 <= y <= ybar`, nnsector gives
-slopes `gamma1`, `gamma2` that are much closer together. If
-`A + B gamma1 C` is Metzler and `A + B gamma2 C` is Hurwitz, nnstab finds a
-vector `v > 0` with `v^T (A + B gamma2 C) < 0` and builds the region
+where $`\lambda > 0`$ is the guaranteed decay rate (`decay`) and
+$`v_{\max}/v_{\min}`$, the ratio of the largest to the smallest entry of
+$`v`$, is the overshoot constant (`overshoot`). The local test combines local
+sector bounds with a localized form of the positive Aizerman conditions, as
+in [[1]](#citation).
 
-    Omega = {x >= 0 : v^T x <= rho}
+**Search over boxes.** A larger box allows a larger region, but its slopes
+are farther apart, and beyond some size the test usually fails. Unless a box
+is specified, nnstab considers the boxes $`0 \le y \le s\,d`$ for a fixed
+direction $`d > 0`$ (by default, all ones). It doubles or halves $`s`$ until
+the outcome of the test changes, locates the boundary by bisection, and
+returns the box whose region contains the largest set
+$`\{x_0 \ge 0 : \lVert x_0 \rVert_1 \le r\}`$.
 
-with `rho` as large as possible while every `x` in `Omega` has its output in
-the box (`C x <= ybar`). In `Omega`, the sum `V(x) = v^T x` can only go down
-along solutions. So a solution that starts in `Omega` stays in it, and
+**Choice of $`v`$.** By default (`v="perron"`), $`v`$ is the left
+eigenvector of $`M`$ for its eigenvalue with the largest real part (the
+Perron eigenvector). This choice gives the largest possible guaranteed decay
+rate. If this eigenvector is not strictly positive, which can happen when
+$`M`$ is reducible, the vector $`v = (-M^\top)^{-1}\mathbf{1}`$ is used
+instead. With `v="lp"`, $`v`$ is chosen to make the region as large as possible
+in every coordinate direction, subject to a decay rate of at least
+`min_decay` (or half of the largest rate if `min_decay` is 0). This is a
+linear program. Because of its structure, nnstab solves it exactly as a
+linear complementarity problem with an M-matrix, in at most $`n`$ linear
+solves and without an LP solver.
 
-    v^T x(t) <= exp(-decay t) v^T x0.
+**Interpretation.** Both tests are sufficient conditions. If a test
+succeeds, stability is certified. If both tests fail, the closed loop may
+still be stable.
 
-**3. Search.** You do not have to pick the box. nnstab tries boxes
-`0 <= y <= s * direction`: it doubles `s` (or halves it) until the test
-changes its answer, finds the edge by bisection, and keeps the box whose
-region holds the largest `sum(x0)`. A larger box gives slopes that are
-farther apart, so at some size the test fails.
-
-**The guarantee.** With `v_max` and `v_min` the largest and smallest
-entries of `v`:
-
-    sum(x(t)) <= (v_max / v_min) exp(-decay t) sum(x0)
-
-The results hold `overshoot = v_max / v_min` and `decay`.
-
-**The choice of v.** By default (`v="perron"`), `v` is the left eigenvector
-of `A + B gamma2 C` for its largest eigenvalue. This gives the fastest
-guaranteed decay. With `v="lp"`, nnstab picks the `v` that makes the region
-as large as possible in every direction at once, while the decay rate stays
-at least `min_decay` (or half the best rate, if `min_decay` is 0). This is a
-linear program, but it has a special structure, so nnstab solves it exactly
-with at most `n` linear solves and no LP solver.
-
-**When a test fails.** These tests are *sufficient* conditions. When one
-passes, the loop is stable. When both fail, the loop may still be stable;
-the tests just cannot show it. The report says which condition failed.
-
-## Options
+## Options of `verify`
 
 `verify(A, B, C, net, ybar=None, direction=None, v="perron", min_decay=0.0, rtol=1e-3)`
 
-| Option | What it does |
+| Argument | Description |
 |---|---|
-| `ybar` | Check only this output box `0 <= y <= ybar` (a number, or one number per output) instead of searching. |
-| `direction` | The shape of the searched boxes `0 <= y <= s * direction`, when there are several outputs (default: all ones). |
-| `v` | `"perron"` (default): the fastest guaranteed decay. `"lp"`: the largest region for a given decay rate. |
-| `min_decay` | The smallest decay rate you accept (default 0). A larger value gives a smaller region. |
-| `rtol` | How precisely the search finds the edge (default `1e-3`). |
+| `ybar` | Tests only the box $`0 \le y \le \bar{y}`$ (a scalar, or one value per output) instead of searching. |
+| `direction` | The direction $`d`$ of the searched boxes $`0 \le y \le s\,d`$ (default: all ones). |
+| `v` | `"perron"` (default): largest guaranteed decay rate. `"lp"`: largest region for a prescribed decay rate. |
+| `min_decay` | Smallest acceptable decay rate (default 0). Larger values give smaller regions. |
+| `rtol` | Relative accuracy of the bisection (default `1e-3`). |
 
 ## Functions
 
-| Function | What it does |
+| Function | Description |
 |---|---|
-| `verify(A, B, C, net, ...)` | The global test, then, if it fails, the search for a local region. Returns a `Verification`. |
-| `check_global(A, B, C, net)` | Only the global test. Returns a `GlobalCheck`. |
-| `check_local(A, B, C, net, ybar, v="perron", min_decay=0)` | Only the local test, on one box. Returns a `LocalCheck`. |
-| `simulate(A, B, C, net, x0, t_end, dt=0.01)` | Simulates the loop (Runge-Kutta 4) from one starting state or many. |
-| `sample_region(check, k, seed=0)` | `k` random starting states, spread evenly over a certified region. Good for testing a result by simulation. |
-| `example_system(kind)` | The example loops `"local"` and `"global"`. Returns `A, B, C, net`. |
-| `example_controller()` | The example network: 1 input, two hidden layers of 8 tanh neurons, 1 output, no biases. |
-| `is_metzler`, `is_hurwitz`, `spectral_abscissa`, `hurwitz_certificate`, `perron_vector`, `copositive_vector`, `largest_region_vector` | The matrix tools behind the tests. |
+| `verify(A, B, C, net, ...)` | Global test, followed by the search for a local region if the global test fails. Returns a `Verification`. |
+| `check_global(A, B, C, net)` | Global test only. Returns a `GlobalCheck`. |
+| `check_local(A, B, C, net, ybar, v="perron", min_decay=0)` | Local test on one box. Returns a `LocalCheck`. |
+| `simulate(A, B, C, net, x0, t_end, dt=0.01)` | Simulates the closed loop (fourth-order Runge-Kutta method) from one or several initial states. |
+| `sample_region(check, k, seed=0)` | Draws `k` initial states uniformly from a certified region, for validation by simulation. |
+| `example_system(kind)` | The example systems `"local"` and `"global"`. Returns `A, B, C, net`. |
+| `example_controller()` | The example network: one input, two hidden layers of eight tanh neurons, one output, and no biases. |
+| `is_metzler`, `is_hurwitz`, `spectral_abscissa`, `hurwitz_certificate`, `perron_vector`, `copositive_vector`, `largest_region_vector` | Matrix routines used by the tests. |
 
-The network can be an `nnsector.Network` or a `torch.nn.Sequential`. `B` may
-be a vector for one input, and `C` a vector for one output.
+The network may be an `nnsector.Network` or a `torch.nn.Sequential`. For one
+input, `B` may be given as a vector; for one output, `C` may be given as a
+vector.
 
-What the results hold:
+The result objects contain the following fields:
 
-* `GlobalCheck`: `Gamma1`, `Gamma2`, `M1 = A + B Gamma1 C`,
-  `M2 = A + B Gamma2 C`, `metzler`, `hurwitz`, `certified`, `decay`, `v`,
-  `overshoot` and `reason` (why it failed).
-* `LocalCheck`: the same with `gamma1` and `gamma2`, plus `ybar`, `rho`,
-  `radius` (every `x0 >= 0` with `sum(x0) <= radius` is in the region),
-  `method` and `contains(x)`.
+* `GlobalCheck`: `Gamma1`, `Gamma2`, `M1` (the matrix $`A + B\Gamma_1 C`$),
+  `M2` (the matrix $`A + B\Gamma_2 C`$), `metzler`, `hurwitz`, `certified`,
+  `decay`, `v`, `overshoot`, and `reason` (the cause of a failure).
+* `LocalCheck`: the same fields with `gamma1` and `gamma2`, together with
+  `ybar`, `rho`, `radius` (every initial state $`x_0 \ge 0`$ whose entries
+  sum to at most `radius` lies in the region), `method`, and the method
+  `contains(x)`.
 * `Verification`: `status`, `stable`, `global_check`, `local_check`,
-  `boxes_tried`, `note` and `contains(x)`.
+  `boxes_tried`, `note`, and the method `contains(x)`.
 
-`print()` gives a short report for each of them.
+Printing any of these objects gives a short report.
 
-## The example loops
+## Example systems
 
-The example controller was trained to act like `u = -tanh(2y) - 0.5y` for
-`0 <= y <= 3`. It has no biases, so `pi(0) = 0`. Near `y = 0` it pushes back
-hard (`pi(y)` is about `-2.5 y`). For large `y` its output levels off, so it
-pushes back more and more weakly.
+The example controller (`example_controller()`) was trained to approximate
+$`u = -\tanh(2y) - 0.5\,y`$ on $`0 \le y \le 3`$. It has no biases, so
+$`\pi(0) = 0`$. Near the origin, $`\pi(y) \approx -2.5\,y`$. For large $`y`$
+its output saturates, and the gain $`\lvert \pi(y)/y \rvert`$ tends to zero.
 
-* `example_system("local")`: the plant is unstable on its own (one
-  eigenvalue of `A` is 0.95). Near 0 the controller makes the loop stable,
-  but far away it is too weak: from `x0 = (4, 4, 4)` the state grows without
-  bound. So no global test can pass. nnstab finds a region of attraction
-  instead, which holds every `x0 >= 0` with `sum(x0) <= 1.706`.
-* `example_system("global")`: a stable plant that the controller only
-  nudges (small `B` and `C`). The global test passes.
+* `example_system("local")`: the matrix $`A`$ is unstable (it has the
+  eigenvalue 0.95). The controller stabilizes the loop near the origin but
+  not for large states; for example, the solution from
+  $`x_0 = (4, 4, 4)`$ diverges. Global stability therefore does not hold, and
+  nnstab returns a region of attraction that contains every $`x_0 \ge 0`$
+  with $`\lVert x_0 \rVert_1 \le 1.706`$.
+* `example_system("global")`: a stable plant with small input and output
+  matrices. The global test succeeds.
 
 ## Examples and tests
 
-* `examples/example1_local.py`: the local example. Checks the result by
-  simulation from random starting states in the region, and plots them if
-  matplotlib is installed.
-* `examples/example2_global.py`: the global example, with a simulation from
-  large starting states.
-* `examples/example3_pytorch.py`: trains a small PyTorch controller without
-  biases, then verifies the loop.
-* `pytest` runs the tests. Among them: for 25 random loops, every result is
-  checked by simulation (the states stay `>= 0`, stay in the region, and go
-  to 0 at least at the guaranteed rate), and the region vector of
-  `v="lp"` is compared with SciPy's LP solver when SciPy is installed.
+| File | Content |
+|---|---|
+| `examples/example1_local.py` | The local example, with a validation of the region by simulation and an optional plot (requires matplotlib). |
+| `examples/example2_global.py` | The global example, with a simulation from large initial states. |
+| `examples/example3_pytorch.py` | Training of a PyTorch controller without biases, followed by its verification. |
+
+The test suite (`pytest`) validates the results by simulation: for 25
+randomly generated systems, every certified result is checked along
+simulated solutions (nonnegativity of the state, invariance of the region,
+and the guaranteed decay rate). When SciPy is installed, the vector computed
+with `v="lp"` is also compared with the solution of SciPy's linear
+programming solver.
 
 ## MATLAB
 
-The same library for MATLAB (and GNU Octave) is in
-[`matlab/`](matlab/README.md), with the same functions. It needs the MATLAB
-version of nnsector.
+A MATLAB implementation with the same functions is provided in
+[`matlab/`](matlab/README.md). It requires the MATLAB version of nnsector
+and MATLAB R2016b or later, and it also runs in GNU Octave. Its results
+agree with those of the Python implementation up to rounding errors.
 
-## Citing
+## Citation
 
-If you use nnstab, please cite:
+If you use nnstab in your research, please cite [1] and [2].
 
 [1] H. Montazeri Hedesh, M. K. Wafi, and M. Siami, "Local Stability and
 Region of Attraction Analysis for Neural Network Feedback Systems under
-Positivity Constraints," in *2025 IEEE 64th Conference on Decision and
-Control (CDC)*, Rio de Janeiro, Brazil, 2025.
-[IEEE Xplore](https://ieeexplore.ieee.org/document/11312171),
-[arXiv:2505.22889](https://arxiv.org/abs/2505.22889)
+Positivity Constraints," in *Proc. 2025 IEEE 64th Conference on Decision
+and Control (CDC)*, Rio de Janeiro, Brazil, 2025.
+doi: [10.1109/CDC57313.2025.11312171](https://ieeexplore.ieee.org/document/11312171).
+Preprint: [arXiv:2505.22889](https://arxiv.org/abs/2505.22889).
 
 [2] H. Montazeri Hedesh and M. Siami, "Ensuring Both Positivity and
 Stability Using Sector-Bounded Nonlinearity for Systems With Neural Network
 Controllers," *IEEE Control Systems Letters*, vol. 8, pp. 1685-1690, 2024.
-[doi:10.1109/LCSYS.2024.3416237](https://doi.org/10.1109/LCSYS.2024.3416237),
-[arXiv:2406.12744](https://arxiv.org/abs/2406.12744)
+doi: [10.1109/LCSYS.2024.3416237](https://doi.org/10.1109/LCSYS.2024.3416237).
+Preprint: [arXiv:2406.12744](https://arxiv.org/abs/2406.12744).
 
 ```bibtex
 @inproceedings{montazerihedesh2025local,
@@ -320,13 +330,13 @@ Controllers," *IEEE Control Systems Letters*, vol. 8, pp. 1685-1690, 2024.
 }
 ```
 
-The positive Aizerman result that both tests rest on:
+The positive Aizerman result on which both tests rest is due to:
 
 [3] R. Drummond, C. Guiver, and M. C. Turner, "Aizerman Conjectures for a
 Class of Multivariate Positive Systems," *IEEE Transactions on Automatic
 Control*, vol. 68, no. 8, pp. 5073-5080, 2023.
-[doi:10.1109/TAC.2022.3217740](https://doi.org/10.1109/TAC.2022.3217740)
+doi: [10.1109/TAC.2022.3217740](https://doi.org/10.1109/TAC.2022.3217740).
 
 ## License
 
-BSD 3-Clause, see [LICENSE](LICENSE).
+nnstab is released under the BSD 3-Clause License. See [LICENSE](LICENSE).
