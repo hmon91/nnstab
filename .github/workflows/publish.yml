@@ -1,0 +1,27 @@
+name: publish
+
+# Uploads the package to PyPI when a GitHub release is published.
+# One-time setup: on pypi.org, add a "trusted publisher" for this repository
+# with the workflow name publish.yml and the environment name pypi.
+# Before the first release: publish nnsector on PyPI first, then change the
+# dependency in pyproject.toml from the GitHub URL to "nnsector>=0.1.0".
+# PyPI does not accept a package that depends on a GitHub URL.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
